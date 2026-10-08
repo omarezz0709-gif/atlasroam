@@ -1,4 +1,4 @@
-﻿"""Practical country facts -> data/facts.json (refreshed once a day at most; they rarely change)
+"""Practical country facts -> data/facts.json (refreshed once a day at most; they rarely change)
 
   Wikidata (CC0): driving side, mains voltage and frequency, plug types, calling code, emergency numbers, currency,
                   official languages, capital (name in the site's 6 languages and position)

@@ -1,4 +1,4 @@
-﻿"""One-off: builds data/world.json (country outlines for the globe) and scripts/names.json (name -> ISO2 for matching
+"""One-off: builds data/world.json (country outlines for the globe) and scripts/names.json (name -> ISO2 for matching
 the FCDO, Wikipedia and other sources) from Natural Earth (public domain). Run by hand only when the map should change:
     pip install shapely && python scripts/build_world.py
 """
@@ -30,20 +30,20 @@ EXTRA = {
     "KP": ["North Korea", "Korea, North", "Democratic People's Republic of Korea"], "KR": ["South Korea", "Korea, South", "Republic of Korea"],
     "LA": ["Laos", "Lao People's Democratic Republic", "Lao PDR"], "FM": ["Micronesia", "Federated States of Micronesia", "Micronesia, Federated States of"],
     "MK": ["North Macedonia", "Macedonia"], "PS": ["Palestine", "Palestinian Territories", "The Occupied Palestinian Territories", "Israel and the Palestinian Territories", "West Bank and Gaza", "State of Palestine", "Palestinian territories"],
-    "TR": ["Turkey", "TÃ¼rkiye", "Turkiye"], "VA": ["Vatican City", "Holy See", "Vatican"], "KN": ["St Kitts and Nevis", "Saint Kitts and Nevis"],
+    "TR": ["Turkey", "Türkiye", "Turkiye"], "VA": ["Vatican City", "Holy See", "Vatican"], "KN": ["St Kitts and Nevis", "Saint Kitts and Nevis"],
     "LC": ["St Lucia", "Saint Lucia"], "VC": ["St Vincent and the Grenadines", "Saint Vincent and the Grenadines"],
     "CV": ["Cape Verde", "Cabo Verde"], "BN": ["Brunei", "Brunei Darussalam"], "RU": ["Russia", "Russian Federation"],
     "SY": ["Syria", "Syrian Arab Republic"], "IR": ["Iran", "Islamic Republic of Iran"], "VN": ["Vietnam", "Viet Nam"],
     "BO": ["Bolivia"], "VE": ["Venezuela"], "TZ": ["Tanzania", "United Republic of Tanzania"], "MD": ["Moldova", "Republic of Moldova"],
-    "XK": ["Kosovo"], "ST": ["Sao Tome and Principe", "SÃ£o TomÃ© and PrÃ­ncipe"], "TW": ["Taiwan", "Republic of China (Taiwan)", "Taiwan, China"],
-    "HK": ["Hong Kong", "Hong Kong SAR"], "MO": ["Macao", "Macau"], "CW": ["CuraÃ§ao", "Curacao"], "SX": ["Sint Maarten"],
+    "XK": ["Kosovo"], "ST": ["Sao Tome and Principe", "São Tomé and Príncipe"], "TW": ["Taiwan", "Republic of China (Taiwan)", "Taiwan, China"],
+    "HK": ["Hong Kong", "Hong Kong SAR"], "MO": ["Macao", "Macau"], "CW": ["Curaçao", "Curacao"], "SX": ["Sint Maarten"],
     "BQ": ["Bonaire", "Caribbean Netherlands", "Bonaire, Sint Eustatius and Saba"], "PR": ["Puerto Rico"],
     "VI": ["US Virgin Islands", "United States Virgin Islands", "Virgin Islands (US)"], "VG": ["British Virgin Islands", "Virgin Islands (British)"],
     "FK": ["Falkland Islands", "Falklands"], "SH": ["St Helena, Ascension and Tristan da Cunha", "Saint Helena"], "PN": ["Pitcairn Island", "Pitcairn Islands"],
     "TC": ["Turks and Caicos Islands"], "KY": ["Cayman Islands"], "GI": ["Gibraltar"], "BM": ["Bermuda"], "AI": ["Anguilla"], "MS": ["Montserrat"],
     "SJ": ["Svalbard"], "GL": ["Greenland"], "FO": ["Faroe Islands"], "NC": ["New Caledonia"], "PF": ["French Polynesia"],
-    "WF": ["Wallis and Futuna"], "PM": ["St Pierre and Miquelon"], "BL": ["St BarthÃ©lemy", "Saint Barthelemy"], "MF": ["St Martin", "Saint Martin"],
-    "RE": ["RÃ©union", "Reunion"], "GP": ["Guadeloupe"], "MQ": ["Martinique"], "GF": ["French Guiana"], "YT": ["Mayotte"],
+    "WF": ["Wallis and Futuna"], "PM": ["St Pierre and Miquelon"], "BL": ["St Barthélemy", "Saint Barthelemy"], "MF": ["St Martin", "Saint Martin"],
+    "RE": ["Réunion", "Reunion"], "GP": ["Guadeloupe"], "MQ": ["Martinique"], "GF": ["French Guiana"], "YT": ["Mayotte"],
     "AW": ["Aruba"], "GU": ["Guam"], "AS": ["American Samoa"], "MP": ["Northern Mariana Islands"], "CK": ["Cook Islands"], "NU": ["Niue"],
     "TK": ["Tokelau"], "IO": ["British Indian Ocean Territory"], "EH": ["Western Sahara"], "AQ": ["Antarctica", "British Antarctic Territory"],
     "SO": ["Somalia", "Somaliland"], "CY": ["Cyprus", "Northern Cyprus"], "NL": ["Netherlands", "The Netherlands", "Kingdom of the Netherlands"],
@@ -82,15 +82,17 @@ def main() -> None:
             part["part"] = p["NAME"]   # e.g. Somaliland shown inside Somalia's advice
         seen.setdefault(iso, []).append(part)
         if not is_part and iso not in [c["id"] for c in countries]:
+            # r = world subregion (sets the colour family), c = Natural Earth's 7-colour index (neighbours differ)
             countries.append({"id": iso, "a3": p["ISO_A3_EH"] if p["ISO_A3_EH"] != "-99" else a3, "n": p["NAME"],
-                              "lat": round(p["LABEL_Y"], 2), "lng": round(p["LABEL_X"], 2), "_area": area_deg})
+                              "lat": round(p["LABEL_Y"], 2), "lng": round(p["LABEL_X"], 2), "_area": area_deg,
+                              "r": p.get("SUBREGION") or p.get("REGION_UN") or "", "c": p.get("MAPCOLOR7") or 1})
         for k in ("NAME", "NAME_LONG", "ADMIN", "FORMAL_EN", "NAME_CIAWF", "BRK_NAME", "GEOUNIT", "SUBUNIT", "NAME_SORT"):
             if p.get(k):
                 names.setdefault(norm(p[k]), set()).add(iso)
     for c in countries:
         if c["id"] == "XK":
             c["a3"] = "XKX"   # Kosovo's code in the sources
-        # rough size in kmÂ² (degreesÂ² scaled at the label latitude) decides which states get a dot
+        # rough size in km² (degrees² scaled at the label latitude) decides which states get a dot
         c["micro"] = c.pop("_area") * 111.3 ** 2 * math.cos(math.radians(c["lat"])) < MICRO_KM2
     names_out = {k: next(iter(v)) for k, v in names.items() if len(v) == 1 and k}
     for iso, lst in EXTRA.items():

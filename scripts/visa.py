@@ -1,4 +1,4 @@
-﻿"""Visa requirements per passport -> data/visa/XX.json (one small file per passport, read by the site on demand)
+"""Visa requirements per passport -> data/visa/XX.json (one small file per passport, read by the site on demand)
 
   Main source: Wikipedia's "Visa requirements for ... citizens" articles (CC BY-SA 4.0), kept current by many editors.
   Fallback:    Passport Index dataset (github.com/ilyankou/passport-index-dataset, MIT) for passports or destinations

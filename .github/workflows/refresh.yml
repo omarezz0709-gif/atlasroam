@@ -2,10 +2,11 @@ name: Refresh data
 
 # Wakes every hour; refreshes at 00:00, 06:00, 12:00 and 18:00 Berlin time, and catches up by itself when GitHub
 # skipped a run (scripts/should_run.py). Everything here is free and needs no keys:
-#   safety.py  official travel advice (Auswärtiges Amt, FCDO, US State Department)   every refresh
+#   safety.py  official pages per country (only used for the official entry-information links)  every refresh
 #   rates.py   exchange rates (ECB via Frankfurter, ExchangeRate-API)                  every refresh
 #   facts.py   plugs, voltage, driving side, languages... (Wikidata, IANA)           once a day
 #   visa.py    visa rules per passport (Wikipedia, Passport Index dataset)           once a day
+#   places.py  cities, must-sees, hidden spots (Wikivoyage, Wikidata)              20 countries per refresh
 # A source that fails keeps its last good data. Cloudflare Pages republishes the site after every data commit.
 on:
   schedule:
@@ -22,7 +23,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
 
@@ -56,6 +57,12 @@ jobs:
         if: steps.due.outputs.run == 'true'
         continue-on-error: true
         run: python scripts/visa.py
+
+      - name: City guides (Wikivoyage, the 20 oldest countries each time, so every country about weekly)
+        if: steps.due.outputs.run == 'true'
+        continue-on-error: true
+        timeout-minutes: 25
+        run: python scripts/places.py --max=20
 
       - name: Commit updated data
         if: steps.due.outputs.run == 'true'

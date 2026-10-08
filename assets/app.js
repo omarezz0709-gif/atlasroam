@@ -1,5 +1,6 @@
 /* Atlasroam: the travel globe. Plain JavaScript, no build step.
-   Data (refreshed by GitHub Actions, see scripts/): data/world.json, safety.json, facts.json, rates.json, visa/XX.json.
+   Data (refreshed by GitHub Actions, see scripts/): data/world.json, places/XX.json (Wikivoyage), inspire.json,
+   facts.json, rates.json, visa/XX.json, safety.json (only for the official entry-information links).
    Everything the visitor chooses (language, theme, passport, currency, tour seen) stays in this browser (localStorage). */
 'use strict';
 const $ = s => document.querySelector(s);
@@ -61,44 +62,43 @@ const getJSON = u => fetch(u, {cache: 'no-cache'}).then(r => { if (!r.ok) throw 
 function toast(msg, ms = 6000){ const el = $('#toast'); el.textContent = msg; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => { el.hidden = true; }, ms); }
 
 /* ================================================================ SETTINGS */
-let colourBy = store.get('colour', 'max');
-if (!['max', 'de', 'uk', 'us'].includes(colourBy)) colourBy = 'max';
 let passport = store.get('passport');
-$('#colour-by').value = colourBy;
-$('#colour-by').onchange = e => { colourBy = e.target.value; store.set('colour', colourBy); refreshGlobe(); renderBadge(); };
-
-function level(iso, src = colourBy){
-  const s = SAFETY.countries[iso]; if (!s) return 0;
-  return src === 'max' ? s.l || 0 : (s[src] || {}).l || 0;
-}
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
-let LV = [];
-function readLevelColours(){ LV = [0, 1, 2, 3, 4].map(i => cssVar('--lv' + i)); }
 function rgba(hex, a){ const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
 function mix(hex, to, k){ const a = parseInt(hex.slice(1), 16), b = parseInt(to.slice(1), 16);
-  const c = i => Math.round((a >> i & 255) * (1 - k) + (b >> i & 255) * k);
+  const c = i => Math.max(0, Math.min(255, Math.round((a >> i & 255) * (1 - k) + (b >> i & 255) * k)));
   return '#' + [16, 8, 0].map(i => c(i).toString(16).padStart(2, '0')).join(''); }
 
 /* ================================================================ GLOBE */
+// "Bold tropical": every world region has its own colour family; Natural Earth's 7-colour index shades
+// neighbours a little lighter or darker so borders stay readable
 const GLOBE_THEME = {
-  dark: {sea: '#0a1730', atmo: '#7c8dff', side: 'rgba(0,0,0,0.3)', stroke: 'rgba(255,255,255,0.20)', relief: '#26324c', ambient: 1, sun: 0.6, hoverMix: '#ffffff'},
-  light: {sea: '#b9cfe6', atmo: '#9fb6ff', side: 'rgba(30,40,60,0.10)', stroke: 'rgba(20,35,70,0.30)', relief: '#ece6d8', ambient: 1.25, sun: 0.35, hoverMix: '#ffffff'},
+  dark: {sea: '#1e1e1e', atmo: '#ff8a70', side: 'rgba(0,0,0,0.35)', stroke: 'rgba(20,20,20,0.75)', relief: '#2b2724', ambient: 1, sun: 0.6, shade: '#000000',
+    fam: {lilac: '#9d86e9', mango: '#e9a548', coral: '#e9787c', mint: '#46c08c', lemon: '#e8c94a', peach: '#e88f62'}},
+  light: {sea: '#f3e9df', atmo: '#ffb199', side: 'rgba(120,60,30,0.10)', stroke: 'rgba(255,255,255,0.95)', relief: '#fbf5ee', ambient: 1.75, sun: 0.12, shade: '#ffffff',
+    fam: {lilac: '#c4afff', mango: '#ffc46e', coral: '#ff9a9e', mint: '#86e0b8', lemon: '#ffe170', peach: '#ffb48c'}},
 };
+const REGION_FAMILY = r => /Europe/.test(r) ? 'lilac' : /Africa/.test(r) ? 'mango' : r === 'Western Asia' ? 'peach' : /Asia/.test(r) ? 'coral'
+  : /America|Caribbean/.test(r) ? 'mint' : 'lemon';
 let GT = GLOBE_THEME.dark, globe = null, mat = null, ctr = null, FEATURES = [], MICRO = [];
 let sel = null, hoverId = null, reliefOn = false;
 const globeEl = $('#globe');
 
+function baseColour(iso){
+  const c = COUNTRY[iso]; if (!c) return GT.fam.lemon;
+  const fam = GT.fam[REGION_FAMILY(c.r || '')];
+  return mix(fam, GT.shade, ((c.c || 4) - 4) * 0.06 + 0.04);
+}
 function capColor(f){
-  const lv = level(f.id), base = LV[lv] || LV[0];
-  let c = f.id === hoverId && f.id !== sel ? mix(base, GT.hoverMix, 0.28) : base;
-  const a = sel && f.id !== sel ? (reliefOn ? 0.55 : 0.75) : (reliefOn ? 0.86 : 1);
-  return rgba(c, a);
+  let c = baseColour(f.id);
+  if (sel && f.id !== sel) c = mix(c, GT.sea, 0.72);   // the chosen country keeps its colour, the rest fades back
+  if (f.id === hoverId && f.id !== sel) c = mix(c, '#ffffff', 0.3);
+  return rgba(c, reliefOn ? 0.92 : 1);
 }
-const altitude = f => f.id === sel ? 0.024 : f.id === hoverId ? 0.014 : 0.007;
-function tipHTML(iso){
-  const lv = level(iso);
-  return `<div class="tip"><b>${esc(cname(iso))}</b><span><i style="background:${LV[lv]}"></i>${esc(t('l' + lv))}</span></div>`;
-}
+// close to a city the camera flies low, so countries lie flat then
+const altitude = f => city ? 0.0002 : f.id === sel || f.id === hoverId ? 0.012 : 0.006;
+const pname = n => (n && (n[LANG] || n.en)) || '';
+function tipHTML(iso){ return `<div class="tip"><b>${esc(cname(iso))}</b></div>`; }
 
 function initGlobe(){
   FEATURES = WORLD.shapes.map(s => ({type: 'Feature', id: s.id, part: s.part, properties: {}, geometry: s.g}));
@@ -111,31 +111,34 @@ function initGlobe(){
     .polygonsData(FEATURES)
     .polygonCapColor(capColor)
     .polygonSideColor(() => GT.side)
-    .polygonStrokeColor(f => f.id === sel ? cssVar('--accent') : GT.stroke)
+    .polygonStrokeColor(() => GT.stroke)
     .polygonAltitude(altitude)
     .polygonsTransitionDuration(260)
-    .polygonLabel(f => tipHTML(f.id))
+    .polygonLabel(f => sel === f.id ? '' : tipHTML(f.id))
     .onPolygonHover(f => { hoverId = f ? f.id : null; globeEl.style.cursor = f ? 'pointer' : 'grab'; refreshGlobe(); })
-    .onPolygonClick(f => select(f.id))
-    .pointsData(MICRO).pointLat('lat').pointLng('lng').pointAltitude(0.012).pointRadius(0.38)
-    .pointColor(p => p.id === sel ? cssVar('--accent') : LV[level(p.id)] || LV[0])
+    .onPolygonClick(f => { if (!justClickedPin() && f.id !== sel) select(f.id); })
+    .pointsData(MICRO).pointLat('lat').pointLng('lng').pointAltitude(0.01).pointRadius(0.38)
+    .pointColor(p => p.id === sel ? cssVar('--accent') : baseColour(p.id))
     .pointLabel(p => tipHTML(p.id))
     .onPointClick(p => select(p.id))
-    .onGlobeClick(() => closePanel());
+    .htmlElementsData([]).htmlLat('lat').htmlLng('lng').htmlAltitude(() => city ? 0.0004 : 0.014).htmlElement(makePin)
+    .onGlobeClick(() => { if (!justClickedPin()) closePanel(); });
+  globe.htmlElementVisibilityModifier((el, v) => { if (!el) return; el.style.opacity = v ? 1 : 0; el.style.pointerEvents = v ? 'auto' : 'none'; });
   mat = globe.globeMaterial();
   ctr = globe.controls();
   ctr.autoRotate = !reduceMotion; ctr.autoRotateSpeed = 0.35;
+  ctr.minDistance = 100.08;   // close enough to see a city's sights (about 5 km up)
   globeEl.addEventListener('pointerdown', () => { ctr.autoRotate = false; });
   applyGlobeTheme();
 }
 function refreshGlobe(){
   if (!globe) return;
-  globe.polygonCapColor(capColor).polygonAltitude(altitude).polygonStrokeColor(f => f.id === sel ? cssVar('--accent') : GT.stroke)
-    .pointColor(p => p.id === sel ? cssVar('--accent') : LV[level(p.id)] || LV[0]);
+  globe.polygonCapColor(capColor).polygonAltitude(altitude).polygonStrokeColor(() => GT.stroke)
+    .pointColor(p => p.id === sel ? cssVar('--accent') : baseColour(p.id));
 }
 function applyGlobeTheme(){
   const th = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-  GT = GLOBE_THEME[th]; readLevelColours();
+  GT = GLOBE_THEME[th];
   if (!globe) return;
   if (!reliefOn){ mat.color.set(GT.sea); if (mat.emissive) mat.emissive.set('#000000'); }
   globe.atmosphereColor(GT.atmo).polygonSideColor(() => GT.side);
@@ -163,7 +166,7 @@ async function buildRelief(){
       if (water[i] > 128){ d[i] = sea[0]; d[i + 1] = sea[1]; d[i + 2] = sea[2]; d[i + 3] = 255; continue; }
       const dx = E(x + 1, y) - E(x - 1, y), dy = E(x, y + 1) - E(x, y - 1);
       const shade = Math.max(-1, Math.min(1, (-dx - dy) / 60)), h = E(x, y) / 255;
-      const k = 1 + shade * (light ? 0.2 : 0.45) + h * (light ? -0.1 : 0.35);
+      const k = 1 + shade * (light ? 0.12 : 0.4) + h * (light ? -0.06 : 0.3);
       d[i] = Math.min(255, land[0] * k); d[i + 1] = Math.min(255, land[1] * k); d[i + 2] = Math.min(255, land[2] * k); d[i + 3] = 255;
     }
     ctx.putImageData(img, 0, 0);
@@ -173,6 +176,50 @@ async function buildRelief(){
     reliefOn = true; refreshGlobe();
   } catch(e){ /* plain globe */ }
 }
+
+/* ---- pins: the country's cities and destinations, or the open city's sights ---- */
+let pinClickAt = 0, PINS = [], pinOn = null;
+const justClickedPin = () => Date.now() - pinClickAt < 500;
+function makePin(p){
+  const el = document.createElement('button');
+  // phones in a city: dots only (names overlap in a small space); the tapped one shows its name
+  const small = p.small || (city && mob() && p.kind !== 'city');
+  el.type = 'button'; el.className = 'pin ' + p.kind + (small ? ' sm' : '') + (p === pinOn ? ' on' : '');
+  el.innerHTML = `<i></i><span>${esc(pname(p.n))}</span>`;
+  el.title = pname(p.n);
+  el.addEventListener('click', e => { e.stopPropagation(); pinClickAt = Date.now(); onPin(p); });
+  ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend'].forEach(ev => el.addEventListener(ev, e => { e.stopPropagation(); pinClickAt = Date.now(); }));
+  return el;
+}
+function setPins(list){ PINS = list; if (globe) globe.htmlElementsData(list); }
+function countryPins(data){
+  const out = [];
+  (data.cities || []).forEach(d => out.push({...d, kind: 'city', ref: d}));
+  (data.other || []).forEach(d => out.push({...d, kind: 'other', ref: d, small: true}));
+  (data.offbeat || []).forEach(d => out.push({...d, kind: 'next', ref: d, small: true}));
+  return out;
+}
+function cityPins(dest){
+  const x = dest.x || {}, out = [{...dest, kind: 'city', ref: dest}];
+  (x.must || []).forEach(s => out.push({...s, kind: 'must', ref: s}));
+  (x.hidden || []).forEach(s => out.push({...s, kind: 'hidden', ref: s, small: true}));
+  (x.next || []).forEach(s => out.push({...s, kind: 'next', ref: s, small: true}));
+  return out;
+}
+function onPin(p){
+  if (!city && (p.kind === 'city' || p.kind === 'other') && p.ref.x) return openCity(p.ref);
+  focusPlace(p.ref);
+}
+function focusPlace(ref){
+  const p = PINS.find(x => x.ref === ref) || null;
+  pinOn = p; if (globe) globe.htmlElementsData(PINS.slice());   // redraw with the highlighted one
+  if (ref.lat != null) flyTo(ref.lat, ref.lng, city ? Math.min(globe.pointOfView().altitude, 0.03) : 0.4);
+  const card = $(`#p-body [data-pid="${CSS.escape(placeKey(ref))}"]`);
+  $$('#p-body .card.on').forEach(c => c.classList.remove('on'));
+  if (card){ card.classList.add('on'); card.scrollIntoView({block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth'}); }
+  if (mob() && !$('#panel').classList.contains('min')){ $('#panel').classList.add('min'); setTimeout(layout, 320); }   // phones: fold the sheet to show the spot
+}
+const placeKey = r => (r.n && r.n.en || r.id || '') + '|' + r.lat + '|' + r.lng;
 
 /* layout: the globe fills the space beside the panel (desktop) or above it (phone) */
 const PANEL_W = 452;
@@ -187,7 +234,7 @@ function freeBox(){
 }
 function fitAlt(box = freeBox()){
   const top = mob() ? 110 : 70;
-  const r = mob() && sel ? Math.min(box.w, box.h) * 0.46   // the gap above the sheet: header and legend are already outside it
+  const r = mob() && sel ? Math.min(box.w, box.h) * 0.46
     : Math.max(mob() ? 110 : 150, Math.min(box.w - 24, box.h - top - (mob() ? 120 : 60)) * 0.47);
   const fov = (globe ? globe.camera().fov : 50) * Math.PI / 180;
   const theta = Math.atan(r * Math.tan(fov / 2) / (box.h / 2));
@@ -201,75 +248,168 @@ function layout(){
   globe.width(b.w).height(b.h);
   document.body.classList.toggle('p-open', !!sel);
 }
-addEventListener('resize', () => { layout(); if (tour) tourGo(tour.i); });
-function fly(iso){
-  const c = COUNTRY[iso]; if (!c || !globe) return;
+addEventListener('resize', () => { layout(); updatePassportChip(); if (tour) tourGo(tour.i); });
+/* camera flights: our own animation, so a new flight cleanly replaces one still under way (the library's own
+   animations overlap and then miss the target, which shows badly when close to a city) */
+let flight = 0;
+function flyTo(lat, lng, alt, ms = reduceMotion ? 0 : 1200){
+  if (!globe) return;
   ctr.autoRotate = false;
-  const pov = globe.pointOfView(), alt = mob() ? fitAlt() * 0.8 : Math.min(Math.max(pov.altitude, 1.4), fitAlt() * 0.85);
-  globe.pointOfView({lat: c.lat, lng: c.lng, altitude: alt}, reduceMotion ? 0 : 1000);
+  const id = ++flight, a = globe.pointOfView(), t0 = performance.now(), k0 = now => ms ? (now - t0) / ms : 1;
+  const dLng = ((lng - a.lng + 540) % 360) - 180;
+  // zoom on a log scale (smooth from far away to street level), out a little in the middle of long flights
+  const la0 = Math.log(a.altitude), la1 = Math.log(alt), hop = Math.min(1, Math.hypot(lat - a.lat, dLng) / 40) * 0.6;
+  stopSpin();
+  const step = now => {
+    if (id !== flight) return;
+    if (k0(now) >= 1) stopSpin();
+    const k = ms ? Math.min(1, (now - t0) / ms) : 1, e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+    globe.pointOfView({lat: a.lat + (lat - a.lat) * e, lng: a.lng + dLng * e, altitude: Math.exp(la0 + (la1 - la0) * e + hop * Math.sin(Math.PI * e))}, 0);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+globeEl.addEventListener('pointerdown', () => { flight++; }, true);   // the visitor grabs the globe: stop flying
+/* the controls keep a little spin after the auto-rotation stops (smooth damping); near a city that spin carries the
+   view kilometres away, so it is cleared whenever the camera flies somewhere */
+function stopSpin(){
+  ctr.autoRotate = false;
+  for (const k of ['_sphericalDelta', 'sphericalDelta']) if (ctr[k] && ctr[k].set) ctr[k].set(0, 0, 0);
+  for (const k of ['_panOffset', 'panOffset']) if (ctr[k] && ctr[k].set) ctr[k].set(0, 0, 0);
+}
+/* zoom so that all the given points fit (a country's cities, a city's sights) */
+function flyToFit(pts, fallback){
+  pts = pts.filter(p => p.lat != null);
+  if (!pts.length){ if (fallback) flyTo(fallback.lat, fallback.lng, Math.max(1.2, fitAlt() * 0.6)); return; }
+  // the middle = median (one sight with odd coordinates must not pull the view away); longitudes relative to the first point
+  const med = a => { a = a.slice().sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  const lng0 = pts[0].lng, lat = med(pts.map(p => p.lat));
+  const lng = ((med(pts.map(p => (p.lng - lng0 + 540) % 360 - 180)) + lng0 + 540) % 360) - 180;
+  // distance of the points from their middle; the farthest 15% are ignored, so one outlier doesn't zoom everything out
+  const dists = pts.map(p => Math.hypot(p.lat - lat, ((p.lng - lng + 540) % 360 - 180) * Math.cos(lat * Math.PI / 180))).sort((a, b) => a - b);
+  const span = dists[Math.min(dists.length - 1, Math.floor(dists.length * 0.85))] || 0.05;
+  // close up, the view's height shows about 50° of arc per unit of altitude: fit the span into the free space with a margin
+  const box = freeBox(), fill = Math.min(box.w, box.h) / box.h * (mob() ? 0.75 : 1);
+  flyTo(lat, lng, Math.min(fitAlt() * 0.8, Math.max(0.0012, span * 2 / 50 / fill * 1.5)));
 }
 
 /* ================================================================ SELECTION + PANEL */
-let tab = 'safety';
+let tab = 'places', city = null;
+const PLACES = {};
+async function loadPlaces(iso){
+  if (!PLACES[iso]) PLACES[iso] = getJSON(`data/places/${iso}.json`).catch(() => null);
+  return PLACES[iso];
+}
 function select(iso, opts = {}){
   if (!COUNTRY[iso]) return;
-  sel = iso;
-  if (opts.tab) tab = opts.tab;
+  sel = iso; city = null; pinOn = null;
+  tab = opts.tab || 'places';
+  document.body.classList.add('explored');
   const p = $('#panel'); p.hidden = false; p.classList.remove('min');
-  layout(); refreshGlobe(); renderPanel(); fly(iso);
-  history.replaceState(null, '', '#' + iso + (tab !== 'safety' ? '/' + tab : ''));
+  layout(); refreshGlobe(); setPins([]); renderPanel();
+  const c = COUNTRY[iso];
+  flyTo(c.lat, c.lng, mob() ? fitAlt() * 0.8 : Math.min(Math.max(globe.pointOfView().altitude, 1.4), fitAlt() * 0.85));
+  loadPlaces(iso).then(d => {
+    if (sel !== iso || city) return;
+    if (d){ setPins(countryPins(d)); if (!opts.city) flyToFit((d.cities || []).concat(d.other || []), c); }
+    if (opts.city && d){ const dest = (d.cities || []).concat(d.other || []).find(x => x.id === opts.city); if (dest) openCity(dest); }
+    else if (tab === 'places') renderPanel();
+  });
+  setHash();
   closeSearch();
+}
+function openCity(dest){
+  city = dest; tab = 'places'; pinOn = null;
+  setPins(cityPins(dest));
+  const x = dest.x || {};
+  flyToFit([dest, ...(x.must || []), ...(x.hidden || [])], dest);
+  renderPanel(); $('#p-body').scrollTop = 0; setHash();
+}
+function closeCity(){
+  city = null; pinOn = null;
+  const d = PLACES[sel];
+  Promise.resolve(d).then(data => { if (data && !city){ setPins(countryPins(data)); flyToFit((data.cities || []).concat(data.other || []), COUNTRY[sel]); } });
+  renderPanel(); setHash();
+}
+function setHash(){
+  if (!sel) return history.replaceState(null, '', location.pathname + location.search);
+  history.replaceState(null, '', '#' + sel + (city ? '/c/' + encodeURIComponent(city.id) : tab !== 'places' ? '/' + tab : ''));
 }
 function closePanel(){
   if (!sel) return;
-  sel = null; $('#panel').hidden = true;
-  layout(); refreshGlobe();
-  history.replaceState(null, '', location.pathname + location.search);
+  sel = null; city = null; $('#panel').hidden = true;
+  setPins([]); layout(); refreshGlobe(); setHash();
 }
 $('#p-close').onclick = closePanel;
+$('#p-back').onclick = closeCity;
 $('#p-grip').onclick = () => { $('#panel').classList.toggle('min'); setTimeout(layout, 320); };
-$$('.tabs button').forEach(b => b.onclick = () => { tab = b.dataset.tab; renderPanel(); history.replaceState(null, '', '#' + sel + (tab !== 'safety' ? '/' + tab : '')); $('#p-body').scrollTop = 0; });
+$$('.tabs button').forEach(b => b.onclick = () => { tab = b.dataset.tab; renderPanel(); setHash(); $('#p-body').scrollTop = 0; });
 
-function renderBadge(){
-  if (!sel) return;
-  const lv = level(sel);
-  $('#p-badge').innerHTML = `<i class="lv${lv}"></i>${esc(t('l' + lv))}${colourBy !== 'max' ? ` <span class="small">(${esc(t('src' + colourBy.toUpperCase()))})</span>` : ''}`;
-}
 function renderPanel(){
   if (!sel) return;
-  $('#p-name').textContent = cname(sel);
   const fl = $('#p-flag'); fl.src = flagSrc(sel); fl.alt = '';
-  renderBadge();
+  const back = $('#p-back');
+  if (city){
+    $('#p-name').textContent = pname(city.n);
+    back.hidden = false; back.textContent = (LANG === 'ar' ? '› ' : '‹ ') + cname(sel);
+    $('#p-sub').textContent = '';
+  } else {
+    $('#p-name').textContent = cname(sel);
+    back.hidden = true; $('#p-sub').textContent = (FACTS.c[sel] && FACTS.c[sel].cap) ? `${t('capital')}: ${pname(FACTS.c[sel].cap.n)}` : '';
+  }
+  $('.tabs').hidden = !!city;
   $$('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab));
   const body = $('#p-body');
-  if (tab === 'entry') renderEntry(body);
+  if (city) renderCity(body);
+  else if (tab === 'entry') renderEntry(body);
   else if (tab === 'practical') renderPractical(body);
-  else renderSafety(body);
+  else renderPlaces(body);
 }
 
-const SRC = [['de', 'DE', 'nameDE'], ['uk', 'GB', 'nameUK'], ['us', 'US', 'nameUS']];
-function renderSafety(body){
-  const s = SAFETY.countries[sel] || {};
-  let h = `<h3>${esc(t('officialAdvice'))}</h3>`;
-  for (const [k, home, nameKey] of SRC){
-    const r = s[k];
-    h += `<div class="src l${r ? r.l : 0}"><div class="src-name"><img src="${flagSrc(home)}" alt="">${esc(t(nameKey))}</div>`;
-    if (sel === home && !r) h += `<p class="src-meta">${esc(t('ownCountry'))}</p>`;
-    else if (!r) h += `<p class="src-meta">${esc(t('notCovered'))}</p>`;
-    else {
-      let what;
-      if (k === 'de') what = t('de_' + r.f);
-      else if (k === 'uk') what = r.st && r.st.length ? r.st.map(x => t('uk_' + x)).join(' · ') : t('uk_none');
-      else what = t('us_' + r.l);
-      h += `<div class="src-level">${esc(what)}</div>
-        <div class="src-meta"><span>${esc(t('updated', {date: fmtDate(r.d)}))}</span><a class="ext" href="${esc(r.u)}" target="_blank" rel="noopener">${esc(t('readOfficial'))}</a></div>`;
-      if (r.c) h += `<details><summary>${esc(t(k === 'us' ? 'summaryOrig' : 'latestChange'))}</summary><p lang="${k === 'de' ? 'de' : 'en'}" dir="ltr">${esc(r.c)}${r.c.length >= 399 ? '…' : ''}</p></details>`;
-    }
-    h += '</div>';
-  }
-  h += `<p class="note warn">${esc(t('safetyNote'))}</p>`;
-  if (SAFETY.generated) h += `<p class="small">${esc(t('checkedAt', {date: fmtDate(SAFETY.generated, true)}))}</p>`;
+/* English text from Wikivoyage, marked as such for the other languages */
+const enText = s => `<span lang="en" dir="auto">${esc(s)}</span>`;
+const enNote = () => LANG === 'en' ? '' : `<small>${esc(t('englishNote'))}</small>`;
+function card(ref, dot, clickable = true){
+  const desc = ref.d ? `<p>${enText(ref.d)}</p>` : '';
+  return `<li><button class="card${clickable ? '' : ' flat'}" type="button" data-pid="${esc(placeKey(ref))}"><b><i class="${dot}"></i>${esc(pname(ref.n))}</b>${desc}</button></li>`;
+}
+function wvLink(title){
+  const u = 'https://en.wikivoyage.org/wiki/' + encodeURIComponent(title.replace(/ /g, '_'));
+  return `<p class="wv-src">${t('fromWV', {title: `<a href="${u}" target="_blank" rel="noopener" lang="en">${esc(title)}</a>`})} · <a class="ext" href="${u}" target="_blank" rel="noopener">${esc(t('readGuide'))}</a></p>`;
+}
+async function renderPlaces(body){
+  const iso = sel;
+  body.innerHTML = `<p class="muted">${esc(t('loading'))}</p>`;
+  const d = await loadPlaces(iso);
+  if (sel !== iso || city || tab !== 'places') return;
+  if (!d){ body.innerHTML = `<p class="muted">${esc(t('noGuide'))}</p>`; return; }
+  let h = d.intro ? `<p class="lead">${enText(d.intro)}${enNote()}</p>` : '';
+  const sec = (key, dot, list) => list && list.length ? `<h3 class="sec-h"><i class="${dot}"></i>${esc(t(key))}</h3><ul class="cards">${list.map(x => card(x, dot)).join('')}</ul>` : '';
+  h += sec('mainCities', 'dot-c', d.cities) + sec('otherDest', 'dot-m', d.other) + sec('offbeat', 'dot-l', d.offbeat);
+  h += wvLink(d.wv);
   body.innerHTML = h;
+  const all = (d.cities || []).concat(d.other || [], d.offbeat || []);
+  body.querySelectorAll('.card').forEach(b => b.onclick = () => {
+    const ref = all.find(x => placeKey(x) === b.dataset.pid); if (!ref) return;
+    if (ref.x) openCity(ref); else focusPlace(ref);
+  });
+}
+function renderCity(body){
+  const d = city, x = d.x || {};
+  let h = x.intro ? `<p class="lead">${enText(x.intro)}${enNote()}</p>` : d.d ? `<p class="lead">${enText(d.d)}${enNote()}</p>` : '';
+  if (!d.x){ body.innerHTML = h + `<p class="muted">${esc(t('noDetail'))}</p>`; return; }
+  const list = (key, dot, items, why) => items && items.length
+    ? `<h3 class="sec-h"><i class="${dot}"></i>${esc(t(key))}</h3>${why ? `<p class="why">${esc(t(why))}</p>` : ''}<ul class="cards">${items.map(s => card(s, dot)).join('')}</ul>` : '';
+  h += list('mustSee', 'dot-c', x.must, 'mustWhy') + list('hiddenSpots', 'dot-h', x.hidden, 'hiddenWhy') + list('dayTrips', 'dot-l', x.next);
+  if (x.around || x.safe){
+    h += `<h3 class="sec-h"><i class="dot-y"></i>${esc(t('goodToKnow'))}</h3>`;
+    if (x.around) h += `<div class="tip-block"><b>${esc(t('gettingAround'))}</b><p>${enText(x.around)}</p></div>`;
+    if (x.safe) h += `<div class="tip-block"><b>${esc(t('staySafe'))}</b><p>${enText(x.safe)}</p></div>`;
+  }
+  h += wvLink(x.wv || d.id);
+  body.innerHTML = h;
+  const all = [...(x.must || []), ...(x.hidden || []), ...(x.next || [])];
+  body.querySelectorAll('.card').forEach(b => b.onclick = () => { const ref = all.find(s => placeKey(s) === b.dataset.pid); if (ref) focusPlace(ref); });
 }
 
 const VISA_CACHE = {};
@@ -410,10 +550,11 @@ function renderPractical(body){
 }
 
 /* ================================================================ PASSPORT */
+const PASSPORT_ICON = '<svg width="18" height="20" viewBox="0 0 18 20" aria-hidden="true" style="display:block"><rect x="1.5" y="1" width="15" height="18" rx="2.5" fill="none" stroke="var(--accent)" stroke-width="1.8"/><circle cx="9" cy="8.5" r="3.2" fill="none" stroke="var(--accent)" stroke-width="1.5"/><path d="M5.5 15h7" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg>';
 function updatePassportChip(){
   const img = $('#pp-flag'), lab = $('#pp-label');
   if (passport){ img.src = flagSrc(passport); img.hidden = false; lab.textContent = mob() ? passport : cname(passport); }
-  else { img.hidden = true; lab.textContent = mob() ? '🛂' : t('passport'); }
+  else { img.hidden = true; lab.innerHTML = mob() ? PASSPORT_ICON : esc(t('passport')); }
 }
 function sortedCountries(){
   return Object.keys(COUNTRY).filter(i => i !== 'AQ').sort((a, b) => cname(a).localeCompare(cname(b), LOC()));
@@ -469,36 +610,34 @@ $('#q').addEventListener('keydown', e => {
 $('#q-list').addEventListener('click', e => { const li = e.target.closest('[data-iso]'); if (li){ select(li.dataset.iso); $('#q').value = ''; } });
 document.addEventListener('pointerdown', e => { if (!e.target.closest('.search')) closeSearch(); });
 
-/* ================================================================ TICKER: newest changes in official advice, then "do not travel" */
+/* ================================================================ TICKER: travel inspiration (hidden spots from everywhere, a new mix daily) */
+let INSPIRE = [];
 function buildTicker(){
-  const items = [], seen = new Set(), now = Date.now(), srcName = k => t('src' + k.toUpperCase());
-  for (const ch of SAFETY.changes || []){
-    if (items.length >= 12) break;
-    items.push({c: ch.c, lv: ch.to, at: ch.at, text: t(ch.to > ch.from ? 'tkRaised' : 'tkLowered', {country: cname(ch.c), src: srcName(ch.s), level: t('l' + ch.to)})});
-    seen.add(ch.c + ch.s);
-  }
-  const recent = [];
-  for (const [iso, c] of Object.entries(SAFETY.countries)) for (const k of ['de', 'uk', 'us']){
-    const r = c[k]; if (!r || r.l < 2 || seen.has(iso + k)) continue;
-    const age = (now - new Date(r.d)) / 864e5;
-    if (age <= 10) recent.push({c: iso, lv: r.l, at: r.d, text: t('tkUpdated', {country: cname(iso), src: srcName(k), level: t('l' + r.l)})});
-  }
-  recent.sort((a, b) => b.lv - a.lv || (a.at < b.at ? 1 : -1));
-  items.push(...recent.slice(0, 14));
-  const dnt = Object.entries(SAFETY.countries).filter(([, c]) => c.l === 4)
-    .map(([iso, c]) => ({c: iso, lv: 4, text: t('tkDoNot', {country: cname(iso), srcs: ['de', 'uk', 'us'].filter(k => (c[k] || {}).l === 4).map(srcName).join(', ')})}))
-    .sort((a, b) => a.text.localeCompare(b.text, LOC()));
-  items.push(...dnt);
+  const items = INSPIRE.filter(it => COUNTRY[it.c]).map(it => ({it,
+    text: it.k === 'offbeat' ? t('tkOffbeat', {country: cname(it.c), name: pname(it.n)})
+      : t('tkHidden', {place: pname(it.in), country: cname(it.c), name: pname(it.n)})}));
   const tk = $('#ticker');
   if (!items.length){ tk.hidden = true; return; }
-  const html = items.map(it => `<button class="tk-item" type="button" data-iso="${it.c}"><i class="lv${it.lv}"></i><span>${esc(it.text)}</span>${it.at ? `<time>${esc(fmtDate(it.at))}</time>` : ''}</button>`).join('');
+  const html = items.map((x, i) => `<button class="tk-item" type="button" data-i="${i}"><i class="${x.it.k === 'offbeat' ? 'dot-l' : 'dot-h'}"></i><span>${esc(x.text)}</span></button>`).join('');
   const run = $('#tk-run');
   run.innerHTML = html + html;   // twice, so the loop is seamless
   tk.hidden = false;
-  requestAnimationFrame(() => { run.style.setProperty('--tk-dur', Math.max(30, run.scrollWidth / 2 / 45) + 's'); });
+  requestAnimationFrame(() => { run.style.setProperty('--tk-dur', Math.max(40, run.scrollWidth / 2 / 40) + 's'); });
   setFold(store.get('tk-folded') === '1', false);
 }
-$('#tk-run').addEventListener('click', e => { const b = e.target.closest('[data-iso]'); if (b) select(b.dataset.iso); });
+/* a ticker item: open its country, then its city, then fly to the spot */
+$('#tk-run').addEventListener('click', async e => {
+  const b = e.target.closest('[data-i]'); if (!b) return;
+  const it = INSPIRE.filter(x => COUNTRY[x.c])[+b.dataset.i]; if (!it) return;
+  select(it.c);
+  const d = await loadPlaces(it.c); if (!d || sel !== it.c) return;
+  if (it.k === 'hidden'){
+    const dest = (d.cities || []).concat(d.other || []).find(x => x.n && it.in && x.n.en === it.in.en);
+    if (dest){ openCity(dest); const s = (dest.x.hidden || []).find(h => h.n.en === it.n.en); if (s) setTimeout(() => focusPlace(s), 1200); }
+  } else {
+    const o = (d.offbeat || []).find(x => x.n.en === it.n.en); if (o) setTimeout(() => focusPlace(o), 1200);
+  }
+});
 function setFold(f, save = true){
   const tk = $('#ticker'), b = $('#tk-fold');
   tk.classList.toggle('folded', f);
@@ -513,7 +652,7 @@ function applyTheme(th, save){
   document.documentElement.dataset.theme = th;
   if (save) store.set('theme', th);
   $('#theme-btn').textContent = th === 'light' ? '☾' : '☀';
-  document.querySelector('meta[name="theme-color"]').content = th === 'light' ? '#e9eff6' : '#060b17';
+  document.querySelector('meta[name="theme-color"]').content = th === 'light' ? '#fff8f2' : '#141414';
   applyGlobeTheme();
   if (READY) buildTicker();
 }
@@ -539,15 +678,15 @@ addEventListener('keydown', e => {
   const open = $$('.modal').find(m => !m.hidden);
   if (open) open.hidden = true; else if (sel && document.activeElement !== $('#q')) closePanel();
 });
-function updateFoot(){ $('#foot-upd').textContent = SAFETY.generated ? t('dataUpdated', {date: fmtDate(SAFETY.generated)}) : ''; }
+let GUIDES_AT = null;
+function updateFoot(){ $('#foot-upd').textContent = GUIDES_AT ? t('dataUpdated', {date: fmtDate(GUIDES_AT)}) : ''; }
 
 /* ================================================================ TOUR (first visit; replay from the ? help) */
-const TOUR_KEY = 'tour-1';
+const TOUR_KEY = 'tour-2';
 function tourSteps(){
   return [
     {t: 't1t', b: 't1b', langs: true},
     {el: '#globe', t: 't2t', b: 't2b', globe: true},
-    {el: '#legend', t: 't3t', b: 't3b'},
     {el: '#pp-btn', t: 't4t', b: 't4b'},
     {el: '.search', t: 't5t', b: 't5b'},
     {el: '#ticker', t: 't6t', b: 't6b'},
@@ -617,9 +756,13 @@ addEventListener('keydown', e => { if (!tour) return;
   if (e.key === 'Escape') endTour(true); else if (e.key === 'ArrowRight' || e.key === 'Enter') tourGo(tour.i + 1); else if (e.key === 'ArrowLeft') tourGo(tour.i - 1, -1); });
 
 /* ================================================================ START */
+/* #JP, #JP/entry, #JP/practical, #JP/c/Kyoto */
 function fromHash(){
-  const m = /^#([A-Z]{2})(?:\/(safety|entry|practical))?$/.exec(location.hash);
-  if (m && COUNTRY[m[1]]) select(m[1], {tab: m[2] || 'safety'});
+  const m = /^#([A-Z]{2})(?:\/(places|entry|practical)|\/c\/(.+))?$/.exec(location.hash);
+  if (!m || !COUNTRY[m[1]]) return;
+  const want = m[3] ? decodeURIComponent(m[3]) : null;
+  if (m[1] === sel && (want ? city && city.id === want : !city && tab === (m[2] || 'places'))) return;   // our own replaceState
+  select(m[1], {tab: m[2] || 'places', city: want});
 }
 async function start(){
   applyStatic();
@@ -630,11 +773,12 @@ async function start(){
   catch(e){ toast(t('loadFail'), 20000); return; }
   WORLD.countries.forEach(c => { COUNTRY[c.id] = c; });
   initGlobe();
-  const res = await Promise.allSettled([getJSON('data/safety.json'), getJSON('data/facts.json'), getJSON('data/rates.json')]);
-  if (res[0].status === 'fulfilled') SAFETY = res[0].value;
-  if (res[1].status === 'fulfilled') FACTS = res[1].value;
-  if (res[2].status === 'fulfilled') RATES = res[2].value;
-  if (res.some(r => r.status === 'rejected')) toast(t('loadFail'));
+  const res = await Promise.allSettled([getJSON('data/facts.json'), getJSON('data/rates.json'), getJSON('data/inspire.json'), getJSON('data/safety.json')]);
+  if (res[0].status === 'fulfilled') FACTS = res[0].value;
+  if (res[1].status === 'fulfilled') RATES = res[1].value;
+  if (res[2].status === 'fulfilled'){ INSPIRE = res[2].value.items || []; GUIDES_AT = res[2].value.generated; }
+  if (res[3].status === 'fulfilled') SAFETY = res[3].value;
+  if (res.slice(0, 3).some(r => r.status === 'rejected')) toast(t('loadFail'));
   READY = true;
   buildSearch(); buildTicker(); updateFoot(); refreshGlobe();
   layout(); globe.pointOfView({altitude: fitAlt(), lat: 20, lng: 10}, 0);
