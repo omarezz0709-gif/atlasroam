@@ -133,6 +133,9 @@ function initGlobe(){
 }
 function refreshGlobe(){
   if (!globe) return;
+  // the clickable dots for tiny states only at world view; zoomed into a country they would be big blobs
+  const micro = sel ? [] : MICRO;
+  if (globe.pointsData().length !== micro.length) globe.pointsData(micro);
   globe.polygonCapColor(capColor).polygonAltitude(altitude).polygonStrokeColor(() => GT.stroke)
     .pointColor(p => p.id === sel ? cssVar('--accent') : baseColour(p.id));
 }
@@ -444,7 +447,7 @@ async function renderEntry(body){
   let h = `<div class="row" style="margin-bottom:10px"><img class="flag" src="${flagSrc(passport)}" alt=""><b>${esc(t('entryFor', {country: cname(passport)}))}</b>
     <button class="btn" type="button" id="chg-pp" style="margin-inline-start:auto;padding:4px 12px">${esc(t('change'))}</button></div>
     <div class="seg" role="radiogroup"><button type="button" role="radio" data-pt="ord" aria-checked="${!dipl}">${esc(t('ppOrdinary'))}</button><button type="button" role="radio" data-pt="dip" aria-checked="${dipl}">${esc(t('ppDiplomatic'))}</button></div>`;
-  const wire = () => { $('#chg-pp').onclick = openPassport; $$('.seg [data-pt]').forEach(b => b.onclick = () => { store.set('pp-type', b.dataset.pt); renderPanel(); }); };
+  const wire = () => { $('#chg-pp').onclick = openPassport; $$('.seg [data-pt]').forEach(b => b.onclick = () => { store.set('pp-type', b.dataset.pt); updatePassportChip(); renderPanel(); }); };
   if (passport === iso){
     body.innerHTML = h + `<p>${esc(t('ownPassport'))}</p>`; wire(); return;
   }
@@ -452,10 +455,19 @@ async function renderEntry(body){
   let v = null, rec = null;
   try { rec = await loadVisa(passport); v = rec.v[iso]; } catch(e){ /* below */ }
   if (sel !== iso || tab !== 'entry') return;   // the visitor moved on meanwhile
-  if (dipl){   // diplomatic/service passports: special agreements; show what is public, never guess
-    const note = rec && rec.dip && rec.dip[iso];
-    h += `<div class="visa mid"><span class="vi" aria-hidden="true">✦</span><div><span>${esc(t('dipIntro', {country: cname(iso)}))}</span></div></div>`;
-    h += note ? `<p class="small">${esc(t('dipNote'))}</p><blockquote class="quote" lang="en" dir="ltr">${esc(note)}</blockquote>` : `<p class="muted">${esc(t('dipNone'))}</p>`;
+  if (dipl){   // diplomatic/service passports: what the destination's visa policy says; quoted, never guessed
+    const e = rec && rec.dv && rec.dv[iso], note = rec && rec.dip && rec.dip[iso];
+    const wp = title => `<a href="https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}" target="_blank" rel="noopener" lang="en" dir="ltr">${esc(title)}</a>`;
+    if (e){
+      const free = e[0] === 'free';
+      h += `<div class="visa ${free ? 'ok' : 'mid'}"><span class="vi" aria-hidden="true">${free ? '✓' : '✦'}</span><div><b>${esc(t(free ? 'dipFree' : 'dipMaybe'))}</b>${free && e[1] ? `<span>${esc(stayText(e[1]))}</span>` : ''}</div></div>`;
+      if (/Schengen/.test(e[3])) h += `<p class="note">${esc(t('dipSchengen', {country: cname(iso)}))}</p>`;
+      h += `<p class="small">${esc(t('dipQuote'))}</p><blockquote class="quote" lang="en" dir="ltr">${esc(e[2])}</blockquote>
+        <p class="small">${t('dipSrc', {title: wp(e[3])})}</p>`;
+    } else if (note){
+      h += `<p class="small">${esc(t('dipNote'))}</p><blockquote class="quote" lang="en" dir="ltr">${esc(note)}</blockquote>`;
+    } else h += `<p class="muted">${esc(t('dipNotListed'))}</p>`;
+    h += `<p class="note warn">${esc(t('dipIntro', {country: cname(iso)}))}</p>`;
     if (v) h += `<p class="small" style="margin-top:14px">${esc(t('forOrdinary'))}</p>`;
   }
   if (v){
@@ -553,14 +565,20 @@ function renderPractical(body){
 const PASSPORT_ICON = '<svg width="18" height="20" viewBox="0 0 18 20" aria-hidden="true" style="display:block"><rect x="1.5" y="1" width="15" height="18" rx="2.5" fill="none" stroke="var(--accent)" stroke-width="1.8"/><circle cx="9" cy="8.5" r="3.2" fill="none" stroke="var(--accent)" stroke-width="1.5"/><path d="M5.5 15h7" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round"/></svg>';
 function updatePassportChip(){
   const img = $('#pp-flag'), lab = $('#pp-label');
-  if (passport){ img.src = flagSrc(passport); img.hidden = false; lab.textContent = mob() ? passport : cname(passport); }
+  if (passport){
+    img.src = flagSrc(passport); img.hidden = false;
+    lab.textContent = (mob() ? passport : cname(passport)) + (store.get('pp-type') === 'dip' ? ' ✦' : '');
+    $('#pp-btn').title = t('yourPassport') + ': ' + cname(passport) + (store.get('pp-type') === 'dip' ? ' · ' + t('ppDiplomatic') : '');
+  }
   else { img.hidden = true; lab.innerHTML = mob() ? PASSPORT_ICON : esc(t('passport')); }
 }
 function sortedCountries(){
   return Object.keys(COUNTRY).filter(i => i !== 'AQ').sort((a, b) => cname(a).localeCompare(cname(b), LOC()));
 }
+function markPassportType(){ $$('#pp-type [data-pt]').forEach(b => b.setAttribute('aria-checked', (store.get('pp-type') === 'dip') === (b.dataset.pt === 'dip'))); }
+$$('#pp-type [data-pt]').forEach(b => b.onclick = () => { store.set('pp-type', b.dataset.pt); markPassportType(); updatePassportChip(); renderPanel(); });
 function openPassport(){
-  const m = $('#pp-modal'); m.hidden = false;
+  const m = $('#pp-modal'); m.hidden = false; markPassportType();
   const q = $('#pp-q'); q.value = ''; fillPassport('');
   setTimeout(() => q.focus(), 50);
 }
@@ -579,22 +597,42 @@ $('#pp-btn').onclick = openPassport;
 
 /* ================================================================ SEARCH */
 const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
-let SEARCH = [], qSel = -1;
+/* search: countries (with capitals) and, once loaded, every city and destination from the guides (data/search.json) */
+let SEARCH = [], PLACE_LIST = null, placeListLoading = null, qSel = -1;
 function buildSearch(){
   SEARCH = Object.keys(COUNTRY).map(i => {
     const f = FACTS.c[i] || {}, cap = f.cap ? f.cap.n[LANG] || f.cap.n.en : '';
-    return {i, name: cname(i), cap, keys: [cname(i), COUNTRY[i].n, i, cap, ...(f.cap ? Object.values(f.cap.n) : [])].map(norm)};
+    return {i, name: cname(i), sub: cap, keys: [cname(i), COUNTRY[i].n, i, cap, ...(f.cap ? Object.values(f.cap.n) : [])].map(norm)};
   });
+  if (PLACE_LIST) SEARCH = SEARCH.concat(PLACE_LIST.filter(p => COUNTRY[p[0]]).map(([i, id, n, , , kind]) => ({
+    i, city: id, kind, name: n[LANG] || n.en, sub: cname(i), keys: [n[LANG] || n.en, ...Object.values(n)].map(norm)})));
 }
+function loadPlaceList(){
+  if (!placeListLoading) placeListLoading = getJSON('data/search.json')
+    .then(d => { PLACE_LIST = d.places || []; buildSearch(); if ($('#q').value) runSearch(); })
+    .catch(() => { placeListLoading = null; });
+}
+$('#q').addEventListener('focus', loadPlaceList);
 function runSearch(){
+  loadPlaceList();
   const q = norm($('#q').value), list = $('#q-list');
   if (!q){ closeSearch(); return; }
-  const hits = SEARCH.map(s => ({s, score: s.keys[0].startsWith(q) ? 0 : s.keys.some(k => k.startsWith(q)) ? 1 : s.keys.some(k => k.includes(q)) ? 2 : 9}))
-    .filter(x => x.score < 9).sort((a, b) => a.score - b.score || a.s.name.localeCompare(b.s.name, LOC())).slice(0, 8);
+  // countries first when equally good; exact starts beat matches inside a word
+  const hits = SEARCH.map(s => ({s, score: (s.keys[0].startsWith(q) ? 0 : s.keys.some(k => k.startsWith(q)) ? 2 : s.keys.some(k => k.includes(q)) ? 4 : 9) + (s.city ? 1 : 0)}))
+    .filter(x => x.score < 9).sort((a, b) => a.score - b.score || a.s.name.localeCompare(b.s.name, LOC())).slice(0, 10);
   qSel = hits.length ? 0 : -1;
-  list.innerHTML = hits.length ? hits.map((x, k) => `<li role="option" data-iso="${x.s.i}" aria-selected="${k === 0}"><img class="flag" src="${flagSrc(x.s.i)}" alt="">${esc(x.s.name)}${x.s.cap ? `<small>${esc(x.s.cap)}</small>` : ''}</li>`).join('')
+  list.innerHTML = hits.length ? hits.map((x, k) => `<li role="option" data-iso="${x.s.i}"${x.s.city ? ` data-city="${esc(x.s.city)}"` : ''} aria-selected="${k === 0}">${x.s.city
+      ? `<span class="pin-ico ${x.s.kind === 'o' ? 'dot-m' : 'dot-c'}"></span>` : `<img class="flag" src="${flagSrc(x.s.i)}" alt="">`}${esc(x.s.name)}${x.s.sub ? `<small>${esc(x.s.sub)}</small>` : ''}</li>`).join('')
     : `<li class="muted">${esc(t('noMatch'))}</li>`;
   list.hidden = false;
+}
+function pickSearch(li){
+  if (li.dataset.city){
+    const iso = li.dataset.iso, id = li.dataset.city;
+    if (sel === iso) loadPlaces(iso).then(d => { const dest = d && (d.cities || []).concat(d.other || []).find(x => x.id === id); if (dest) openCity(dest); });
+    else select(iso, {city: id});
+  } else select(li.dataset.iso);
+  $('#q').value = ''; closeSearch();
 }
 function closeSearch(){ $('#q-list').hidden = true; qSel = -1; }
 $('#q').addEventListener('input', runSearch);
@@ -604,10 +642,10 @@ $('#q').addEventListener('keydown', e => {
     e.preventDefault(); if (!items.length) return;
     qSel = (qSel + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
     items.forEach((li, k) => li.setAttribute('aria-selected', k === qSel));
-  } else if (e.key === 'Enter' && items[qSel]){ select(items[qSel].dataset.iso); $('#q').value = ''; $('#q').blur(); }
+  } else if (e.key === 'Enter' && items[qSel]){ pickSearch(items[qSel]); $('#q').blur(); }
   else if (e.key === 'Escape'){ closeSearch(); $('#q').blur(); }
 });
-$('#q-list').addEventListener('click', e => { const li = e.target.closest('[data-iso]'); if (li){ select(li.dataset.iso); $('#q').value = ''; } });
+$('#q-list').addEventListener('click', e => { const li = e.target.closest('[data-iso]'); if (li) pickSearch(li); });
 document.addEventListener('pointerdown', e => { if (!e.target.closest('.search')) closeSearch(); });
 
 /* ================================================================ TICKER: travel inspiration (hidden spots from everywhere, a new mix daily) */

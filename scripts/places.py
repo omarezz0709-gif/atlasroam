@@ -418,6 +418,20 @@ def inspiration(index: dict) -> list[dict]:
     return pool[:40]
 
 
+def search_index(index: dict) -> list[list]:
+    """Every city and destination for the site's search: [country, id, {lang: name}, lat, lng, kind c/o]."""
+    out = []
+    for iso in sorted(index.get("done", {})):
+        c = load_json(f"places/{iso}.json", None)
+        if not c:
+            continue
+        for kind, key in (("c", "cities"), ("o", "other")):
+            for d in c.get(key, []):
+                names = {lg: v for lg, v in d["n"].items() if lg == "en" or v != d["n"].get("en")}   # only names that differ
+                out.append([iso, d["id"], names, d["lat"], d["lng"], kind])
+    return out
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     limit = 10**6 if "--all" in sys.argv else next((int(a.split("=")[1]) for a in sys.argv if a.startswith("--max=")), 20)
@@ -452,6 +466,7 @@ def main() -> int:
     index["generated"] = iso_z(now_utc())
     save_json("places/index.json", index)
     save_json("inspire.json", {"generated": iso_z(now_utc()), "items": inspiration(index)})
+    save_json("search.json", {"generated": iso_z(now_utc()), "places": search_index(index)})
     print(f"done: {ok} of {len(todo)} countries")
     return 0 if ok or not todo else 1
 

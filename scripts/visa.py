@@ -19,6 +19,7 @@ import urllib.parse
 
 from bs4 import BeautifulSoup
 
+import diplomatic
 from common import DATA, countries, due, get_json, http_get, iso2_of, iso_z, load_json, now_utc, save_json
 
 API = "https://en.wikipedia.org/w/api.php"
@@ -109,8 +110,8 @@ def parse_article(title: str, all_iso: set[str]) -> tuple[str | None, dict, str,
                 continue
             link = cells[0].find("a", href=True)
             names = [clean(cells[0])]
-            if link:
-                names.insert(0, urllib.parse.unquote(link["href"].split("/")[-1]).replace("_", " "))
+            if link and link.get("href"):
+                names.insert(0, urllib.parse.unquote(link.get("href").split("/")[-1]).replace("_", " "))
                 if link.get("title"):
                     names.insert(0, link["title"])
             iso = next((i for i in (iso2_of(n) for n in names) if i), None)
@@ -192,6 +193,14 @@ def main() -> int:
         done[who] = {"src": "wp", "t": t, "d": modified, "v": data, **({"dip": dips} if dips else {})}
         time.sleep(0.3)   # be gentle with Wikipedia
     print(len(done), "passports from Wikipedia,", failed, "articles failed")
+    # diplomatic and service passports: from the destinations' "Visa policy of ..." articles (scripts/diplomatic.py)
+    try:
+        dipl = diplomatic.build()
+        if sum(len(v) for v in dipl.values()) < 1500:
+            raise RuntimeError("too few rules")
+    except Exception as e:
+        print("diplomatic passports FAILED, keeping the last good rules:", e, file=sys.stderr)
+        dipl = None
     passports = {}
     for iso in sorted(set(done) | set(pi)):
         if iso not in known:
@@ -209,6 +218,15 @@ def main() -> int:
         extra = {d: v + ["pi"] for d, v in pi.get(iso, {}).items() if d not in rec["v"] and d in known and v[0]}
         rec["v"].update(extra)
         rec["pi"] = pi_date
+        # dv = {destination: [kind "free"/"note", stay, quote, source article]}
+        if dipl is not None:
+            dv = {d: [e["k"], e["st"], e["s"], e["t"]] for d, e in dipl.get(iso, {}).items() if d in known}
+        else:
+            dv = (load_json(f"visa/{iso}.json", {}) or {}).get("dv", {})
+        if dv:
+            rec["dv"] = dv
+        else:
+            rec.pop("dv", None)
         save_json(f"visa/{iso}.json", rec)
         passports[iso] = rec["src"]
     save_json("visa/index.json", {"generated": iso_z(now_utc()), "pi_date": pi_date, "passports": passports})

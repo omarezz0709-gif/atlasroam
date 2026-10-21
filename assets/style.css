@@ -48,6 +48,7 @@ a{color:var(--accent)}
 #q-list li,.pick-list li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer}
 #q-list li small{color:var(--muted);margin-inline-start:auto;font-size:12px}
 #q-list li[aria-selected="true"],#q-list li:hover,.pick-list li:hover,.pick-list li[aria-selected="true"]{background:var(--accent-soft)}
+.pin-ico{width:12px;height:12px;border-radius:50%;flex:none;margin:0 5px;box-shadow:0 0 0 2px var(--panel-solid),0 0 0 3px var(--line2)}
 .flag{width:22px;height:16.5px;border-radius:3px;object-fit:cover;flex:none;box-shadow:0 0 0 1px var(--line2)}
 .tools{display:flex;align-items:center;gap:8px}
 .ico,.chip,#lang{height:40px;min-width:40px;border-radius:999px;border:1px solid var(--line2);background:var(--panel);backdrop-filter:blur(10px);cursor:pointer;font-size:17px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px}
